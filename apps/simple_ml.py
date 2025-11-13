@@ -298,11 +298,26 @@ def _instantiate_loss(loss_fn, loss_config):
 
 
 def _resolve_optimizer(model, optimizer, lr, weight_decay, config):
-    """Return an optimizer instance based on explicit args or configuration."""
+    """Return an optimizer instance based on explicit args or configuration.
+    
+    Priority order:
+    1. If config["optimizer"] exists, use it (config takes precedence)
+    2. If optimizer is an Optimizer instance, use it
+    3. If optimizer is a callable (class), instantiate it with lr and weight_decay
+    4. Otherwise raise TypeError
+    """
+    # Config takes highest priority - if optimizer is specified in config, use it
     optimizer_cfg = None if config is None else config.get("optimizer")
     if optimizer_cfg is not None:
         return ndl.optim.build_optimizer_from_config(model.parameters(), optimizer_cfg)
 
+    # If no config optimizer, fall back to explicit optimizer parameter
+    if optimizer is None:
+        raise ValueError(
+            "optimizer must be provided either as a parameter or in config['optimizer']. "
+            "If using config, set config['optimizer'] = {'name': 'adam', ...}"
+        )
+    
     if isinstance(optimizer, ndl.optim.Optimizer):
         return optimizer
 
