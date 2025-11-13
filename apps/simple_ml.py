@@ -160,10 +160,12 @@ def epoch_general_cifar10(
     correct = 0
     total_loss = 0.0
     total_samples = 0
-    iterator = dataloader
-    if progress_bar:
-        batch_size = getattr(dataloader, "batch_size", None)
-        dataset_len = len(getattr(dataloader, "dataset", [])) if hasattr(dataloader, "dataset") else None
+    
+    # Setup progress bar if requested
+    if progress_bar and dataloader is not None:
+        batch_size = getattr(dataloader, "batch_size", None) or 1
+        dataset = getattr(dataloader, "dataset", None)
+        dataset_len = len(dataset) if dataset is not None else None
         total_batches = None
         if dataset_len is not None and batch_size:
             total_batches = math.ceil(dataset_len / batch_size)
@@ -172,13 +174,22 @@ def epoch_general_cifar10(
                 total_batches = min(total_batches, max_batches)
             else:
                 total_batches = max_batches
+        
         if epoch_index is not None and total_epochs is not None:
             desc = f"Epoch {epoch_index}/{total_epochs}"
         elif epoch_index is not None:
             desc = f"Epoch {epoch_index}"
         else:
             desc = "Epoch"
-        iterator = tqdm(dataloader, total=total_batches, desc=desc, leave=False)
+        
+        # Create iterator with tqdm wrapper
+        # Ensure total is an integer if provided, or None if not
+        tqdm_kwargs = {"desc": desc, "leave": False}
+        if total_batches is not None:
+            tqdm_kwargs["total"] = int(total_batches)
+        iterator = tqdm(dataloader, **tqdm_kwargs)
+    else:
+        iterator = dataloader
     
     batch_counter = 0
     for batch in iterator:
