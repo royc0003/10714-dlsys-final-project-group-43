@@ -469,6 +469,9 @@ class NDArray:
         view = self.__getitem__(idxs)
         if isinstance(other, NDArray):
             assert prod(view.shape) == prod(other.shape)
+            # Ensure other is on the same device as self
+            if other.device != self.device:
+                other = other.to(self.device)
             self.device.ewise_setitem(
                 other.compact()._handle,
                 view._handle,
@@ -500,6 +503,9 @@ class NDArray:
         out = NDArray.make(self.shape, device=self.device)
         if isinstance(other, NDArray):
             assert self.shape == other.shape, "operation needs two equal-sized arrays"
+            # Ensure other is on the same device as self
+            if other.device != self.device:
+                other = other.to(self.device)
             ewise_func(self.compact()._handle, other.compact()._handle, out._handle)
         else:
             scalar_func(self.compact()._handle, other, out._handle)
@@ -602,6 +608,10 @@ class NDArray:
 
         m, n, p = self.shape[0], self.shape[1], other.shape[1]
 
+        # Ensure other is on the same device as self
+        if other.device != self.device:
+            other = other.to(self.device)
+        
         # if the matrix is aligned, use tiled matrix multiplication
         if hasattr(self.device, "matmul_tiled") and all(
             d % self.device.__tile_size__ == 0 for d in (m, n, p)
@@ -614,8 +624,22 @@ class NDArray:
                 )
 
             t = self.device.__tile_size__
-            a = tile(self.compact(), t).compact()
-            b = tile(other.compact(), t).compact()
+            # Ensure both arrays are compacted and on the correct device
+            self_compact = self.compact()
+            other_compact = other.compact()
+            # Double-check device after compact (in case compact returned a view)
+            if other_compact.device != self.device:
+                other_compact = other_compact.to(self.device)
+            # Create tiled views and ensure they're compacted on the correct device
+            a_tiled = tile(self_compact, t)
+            b_tiled = tile(other_compact, t)
+            # Compact the tiled views, ensuring output is on the correct device
+            a = a_tiled.compact()
+            if a.device != self.device:
+                a = a.to(self.device)
+            b = b_tiled.compact()
+            if b.device != self.device:
+                b = b.to(self.device)
             out = NDArray.make((a.shape[0], b.shape[1], t, t), device=self.device)
             self.device.matmul_tiled(a._handle, b._handle, out._handle, m, n, p)
 
@@ -627,8 +651,14 @@ class NDArray:
 
         else:
             out = NDArray.make((m, p), device=self.device)
+            # Ensure both arrays are compacted and on the correct device
+            self_compact = self.compact()
+            other_compact = other.compact()
+            # Double-check device after compact (in case compact returned a view)
+            if other_compact.device != self.device:
+                other_compact = other_compact.to(self.device)
             self.device.matmul(
-                self.compact()._handle, other.compact()._handle, out._handle, m, n, p
+                self_compact._handle, other_compact._handle, out._handle, m, n, p
             )
             return out
 
