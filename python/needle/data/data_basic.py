@@ -91,12 +91,22 @@ class DataLoader:
       if self.dtype is not None:
           tensor_kwargs["dtype"] = self.dtype
 
-      return tuple(
-          x
-          if isinstance(x, Tensor)
-          else Tensor(x, requires_grad=False, **tensor_kwargs)
-          for x in batch
-      )
+      result = []
+      for x in batch:
+          if isinstance(x, Tensor):
+              # Always convert to numpy first to ensure clean device placement
+              x_np = x.numpy()
+              # Recreate tensor on target device
+              if tensor_kwargs:
+                  x = Tensor(x_np, requires_grad=False, **tensor_kwargs)
+              else:
+                  # If no device/dtype specified, keep original
+                  x = Tensor(x_np, requires_grad=False)
+          else:
+              # Convert numpy array or other type to Tensor on target device
+              x = Tensor(x, requires_grad=False, **tensor_kwargs)
+          result.append(x)
+      return tuple(result)
 
 
       ### END YOUR SOLUTION

@@ -152,6 +152,9 @@ def epoch_general_cifar10(
     """
     np.random.seed(4)
     ### BEGIN YOUR SOLUTION
+    if dataloader is None:
+        raise ValueError("dataloader cannot be None")
+    
     if opt is not None:
         model.train()
     else:
@@ -162,7 +165,9 @@ def epoch_general_cifar10(
     total_samples = 0
     
     # Setup progress bar if requested
-    if progress_bar and dataloader is not None:
+    pbar = None
+    use_progress = progress_bar and dataloader is not None
+    if use_progress:
         batch_size = getattr(dataloader, "batch_size", None) or 1
         dataset = getattr(dataloader, "dataset", None)
         dataset_len = len(dataset) if dataset is not None else None
@@ -182,47 +187,76 @@ def epoch_general_cifar10(
         else:
             desc = "Epoch"
         
-        # Create iterator with tqdm wrapper
-        # Ensure total is an integer if provided, or None if not
-        tqdm_kwargs = {"desc": desc, "leave": False}
+        # Create progress bar (standalone, not wrapping dataloader)
         if total_batches is not None:
-            tqdm_kwargs["total"] = int(total_batches)
-        iterator = tqdm(dataloader, **tqdm_kwargs)
-    else:
-        iterator = dataloader
+            pbar = tqdm(total=int(total_batches), desc=desc, leave=False)
+        else:
+            pbar = tqdm(desc=desc, leave=False)
     
     batch_counter = 0
-    for batch in iterator:
-        if max_batches is not None and batch_counter >= max_batches:
-            break
-        batch_counter += 1
-        X, y = batch
-        
-        if opt is not None:
-            opt.reset_grad()
-        
-        out = model(X)
-        
-        loss = loss_fn(out, y)
-        
-        # Compute accuracy
-        predictions = np.argmax(out.numpy(), axis=1)
-        y_np = y.numpy()
-        if len(y_np.shape) > 1:
-            y_np = y_np.flatten()
-        batch_correct = np.sum(predictions == y_np)
-        correct += batch_correct
-        total_samples += y_np.shape[0]
-        
-        # Accumulate loss (weighted by batch size)
-        total_loss += loss.data.numpy() * y_np.shape[0]
-        
-        if opt is not None:
-            loss.backward()
-            opt.step()
+    try:
+        for batch in dataloader:
+            if max_batches is not None and batch_counter >= max_batches:
+                break
+            
+            if pbar is not None:
+                pbar.update(1)
+            
+            batch_counter += 1
+            X, y = batch
+            
+            if opt is not None:
+                opt.reset_grad()
+            
+            out = model(X)
+            
+            loss = loss_fn(out, y)
+            
+            # Compute accuracy
+            predictions = np.argmax(out.numpy(), axis=1)
+            y_np = y.numpy()
+            if len(y_np.shape) > 1:
+                y_np = y_np.flatten()
+            batch_correct = np.sum(predictions == y_np)
+            correct += batch_correct
+            total_samples += y_np.shape[0]
+            
+            # Accumulate loss (weighted by batch size)
+            loss_val = loss.data.numpy()
+            # Convert numpy array/scalar to Python float
+            if isinstance(loss_val, np.ndarray):
+                loss_val = float(loss_val.item() if loss_val.size == 1 else loss_val)
+            else:
+                # Handle numpy scalars (np.float32, etc.)
+                loss_val = float(loss_val)
+            total_loss += loss_val * float(y_np.shape[0])
+            
+            if opt is not None:
+                loss.backward()
+                opt.step()
+    finally:
+        if use_progress and pbar is not None:
+            pbar.close()
     
-    avg_acc = correct / total_samples if total_samples > 0 else 0.0
-    avg_loss = total_loss / total_samples if total_samples > 0 else 0.0
+    # Ensure all values are Python native types, not numpy scalars
+    # Use .item() for numpy scalars, float() for everything else
+    if isinstance(correct, (np.integer, np.floating)):
+        correct = float(correct.item())
+    else:
+        correct = float(correct)
+    
+    if isinstance(total_samples, (np.integer, np.floating)):
+        total_samples = float(total_samples.item())
+    else:
+        total_samples = float(total_samples)
+    
+    if isinstance(total_loss, (np.integer, np.floating)):
+        total_loss = float(total_loss.item())
+    else:
+        total_loss = float(total_loss)
+    
+    avg_acc = float(correct / total_samples) if total_samples > 0 else 0.0
+    avg_loss = float(total_loss / total_samples) if total_samples > 0 else 0.0
     
     return avg_acc, avg_loss
     ### END YOUR SOLUTION
@@ -342,6 +376,15 @@ def train_cifar10(model, dataloader, n_epochs=1, optimizer=ndl.optim.Adam,
             total_epochs=n_epochs,
             max_batches=max_batches,
         )
+        # Ensure metrics are Python floats for downstream consumers / logging
+        if isinstance(train_acc, (np.ndarray, np.integer, np.floating)):
+            train_acc = float(np.asarray(train_acc).item())
+        else:
+            train_acc = float(train_acc)
+        if isinstance(train_loss, (np.ndarray, np.integer, np.floating)):
+            train_loss = float(np.asarray(train_loss).item())
+        else:
+            train_loss = float(train_loss)
         elapsed = time.time() - start_time
         if verbose:
             print(f"[Epoch {epoch + 1}/{n_epochs}] finished in {elapsed:.2f}s")
