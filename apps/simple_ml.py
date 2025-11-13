@@ -3,8 +3,10 @@
 import copy
 import struct
 import gzip
+import math
 import numpy as np
 
+from tqdm.auto import tqdm
 import apps.config_utils as config_utils
 
 import sys
@@ -120,7 +122,16 @@ def nn_epoch(X, y, W1, W2, lr=0.1, batch=100):
     ### END YOUR SOLUTION
 
 ### CIFAR-10 training ###
-def epoch_general_cifar10(dataloader, model, loss_fn=nn.SoftmaxLoss(), opt=None):
+def epoch_general_cifar10(
+    dataloader,
+    model,
+    loss_fn=nn.SoftmaxLoss(),
+    opt=None,
+    *,
+    progress_bar=False,
+    epoch_index=None,
+    total_epochs=None,
+):
     """
     Iterates over the dataloader. If optimizer is not None, sets the
     model to train mode, and for each batch updates the model parameters.
@@ -147,8 +158,22 @@ def epoch_general_cifar10(dataloader, model, loss_fn=nn.SoftmaxLoss(), opt=None)
     correct = 0
     total_loss = 0.0
     total_samples = 0
+    iterator = dataloader
+    if progress_bar:
+        batch_size = getattr(dataloader, "batch_size", None)
+        dataset_len = len(getattr(dataloader, "dataset", [])) if hasattr(dataloader, "dataset") else None
+        total_batches = None
+        if dataset_len is not None and batch_size:
+            total_batches = math.ceil(dataset_len / batch_size)
+        if epoch_index is not None and total_epochs is not None:
+            desc = f"Epoch {epoch_index}/{total_epochs}"
+        elif epoch_index is not None:
+            desc = f"Epoch {epoch_index}"
+        else:
+            desc = "Epoch"
+        iterator = tqdm(dataloader, total=total_batches, desc=desc, leave=False)
     
-    for batch in dataloader:
+    for batch in iterator:
         X, y = batch
         
         if opt is not None:
@@ -273,9 +298,18 @@ def train_cifar10(model, dataloader, n_epochs=1, optimizer=ndl.optim.Adam,
     opt = _resolve_optimizer(model, optimizer, lr, weight_decay, config)
     loss_cfg = config.get("loss")
     loss_fn_instance = _instantiate_loss(loss_fn, loss_cfg)
+    progress_enabled = config.get("progress_bar", False)
 
     for epoch in range(n_epochs):
-        train_acc, train_loss = epoch_general_cifar10(dataloader, model, loss_fn=loss_fn_instance, opt=opt)
+        train_acc, train_loss = epoch_general_cifar10(
+            dataloader,
+            model,
+            loss_fn=loss_fn_instance,
+            opt=opt,
+            progress_bar=progress_enabled,
+            epoch_index=epoch + 1,
+            total_epochs=n_epochs,
+        )
         epoch_metrics = {
             "epoch": epoch + 1,
             "train_acc": train_acc,
@@ -367,7 +401,13 @@ def evaluate_cifar10(model, dataloader, loss_fn=nn.SoftmaxLoss):
     np.random.seed(4)
     ### BEGIN YOUR SOLUTION
     loss_fn_instance = loss_fn()
-    avg_acc, avg_loss = epoch_general_cifar10(dataloader, model, loss_fn=loss_fn_instance, opt=None)
+    avg_acc, avg_loss = epoch_general_cifar10(
+        dataloader,
+        model,
+        loss_fn=loss_fn_instance,
+        opt=None,
+        progress_bar=False,
+    )
     return avg_acc, avg_loss
     ### END YOUR SOLUTION
 
