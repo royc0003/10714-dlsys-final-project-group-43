@@ -1,8 +1,11 @@
 """hw1/apps/simple_ml.py"""
 
+import copy
 import struct
 import gzip
 import numpy as np
+
+import apps.config_utils as config_utils
 
 import sys
 
@@ -178,8 +181,58 @@ def epoch_general_cifar10(dataloader, model, loss_fn=nn.SoftmaxLoss(), opt=None)
     ### END YOUR SOLUTION
 
 
+def _instantiate_loss(loss_fn, loss_config):
+    """Instantiate a loss module from configuration or fallback value."""
+    if loss_config is None:
+        return loss_fn() if isinstance(loss_fn, type) else loss_fn
+
+    if isinstance(loss_config, nn.Module):
+        return loss_config
+
+    if isinstance(loss_config, str):
+        if not hasattr(nn, loss_config):
+            raise AttributeError(f"needle.nn has no loss named '{loss_config}'.")
+        loss_cls = getattr(nn, loss_config)
+        return loss_cls()
+
+    if isinstance(loss_config, dict):
+        loss_cfg = dict(loss_config)
+        if "callable" in loss_cfg:
+            factory = loss_cfg.pop("callable")
+            if callable(factory):
+                return factory(**loss_cfg)
+            raise TypeError("'callable' entry in loss config must be callable.")
+        name = loss_cfg.pop("name", None)
+        if name is None:
+            raise KeyError("Loss config must include a 'name' when provided as a dict.")
+        if not hasattr(nn, name):
+            raise AttributeError(f"needle.nn has no loss named '{name}'.")
+        loss_cls = getattr(nn, name)
+        return loss_cls(**loss_cfg)
+
+    if callable(loss_config):
+        return loss_config()
+
+    raise TypeError("Unsupported loss configuration type.")
+
+
+def _resolve_optimizer(model, optimizer, lr, weight_decay, config):
+    """Return an optimizer instance based on explicit args or configuration."""
+    optimizer_cfg = None if config is None else config.get("optimizer")
+    if optimizer_cfg is not None:
+        return ndl.optim.build_optimizer_from_config(model.parameters(), optimizer_cfg)
+
+    if isinstance(optimizer, ndl.optim.Optimizer):
+        return optimizer
+
+    if not callable(optimizer):
+        raise TypeError("optimizer must be an Optimizer instance or class when config is not provided.")
+
+    return optimizer(model.parameters(), lr=lr, weight_decay=weight_decay)
+
+
 def train_cifar10(model, dataloader, n_epochs=1, optimizer=ndl.optim.Adam,
-        lr=0.001, weight_decay=0.001, loss_fn=nn.SoftmaxLoss):
+        lr=0.001, weight_decay=0.001, loss_fn=nn.SoftmaxLoss, config=None, metrics_callback=None):
     """
     Performs {n_epochs} epochs of training.
 
@@ -187,25 +240,115 @@ def train_cifar10(model, dataloader, n_epochs=1, optimizer=ndl.optim.Adam,
         dataloader: Dataloader instance
         model: nn.Module instance
         n_epochs: number of epochs (int)
-        optimizer: Optimizer class
-        lr: learning rate (float)
-        weight_decay: weight decay (float)
-        loss_fn: nn.Module class
+        optimizer: Optimizer class or instance. Ignored when config["optimizer"] is provided.
+        lr: learning rate (float). Overrides default when not set in config.
+        weight_decay: weight decay (float). Overrides default when not set in config.
+        loss_fn: nn.Module class or instance
+        config: Optional dictionary describing run/optimizer/loss configuration.
+        metrics_callback: Optional callable receiving per-epoch metric dictionaries.
 
     Returns:
-        avg_acc: average accuracy over dataset from last epoch of training
-        avg_loss: average loss over dataset from last epoch of training
+        avg_acc: average accuracy over dataset from last epoch of training.
+        avg_loss: average loss over dataset from last epoch of training.
+        history (optional): when config["return_history"] is True, a list of per-epoch metric dicts.
     """
-    np.random.seed(4)
-    ### BEGIN YOUR SOLUTION
-    opt = optimizer(model.parameters(), lr=lr, weight_decay=weight_decay)
-    loss_fn_instance = loss_fn()
-    
+    config = copy.deepcopy(config) if config is not None else {}
+
+    run_config = config.get("run", {})
+    if run_config and not isinstance(run_config, dict):
+        raise TypeError("'run' section of config must be a dictionary if provided.")
+
+    seed = run_config.get("seed", 4)
+    np.random.seed(seed)
+    epochs_override = run_config.get("epochs")
+    if epochs_override is not None:
+        n_epochs = epochs_override
+
+    if n_epochs <= 0:
+        raise ValueError("Number of epochs must be positive.")
+
+    record_history = config.get("return_history", False)
+    history = []
+
+    opt = _resolve_optimizer(model, optimizer, lr, weight_decay, config)
+    loss_cfg = config.get("loss")
+    loss_fn_instance = _instantiate_loss(loss_fn, loss_cfg)
+
     for epoch in range(n_epochs):
-        avg_acc, avg_loss = epoch_general_cifar10(dataloader, model, loss_fn=loss_fn_instance, opt=opt)
-    
+        train_acc, train_loss = epoch_general_cifar10(dataloader, model, loss_fn=loss_fn_instance, opt=opt)
+        epoch_metrics = {
+            "epoch": epoch + 1,
+            "train_acc": train_acc,
+            "train_loss": train_loss,
+            "learning_rate": getattr(opt, "lr", lr),
+        }
+        history.append(epoch_metrics)
+        if callable(metrics_callback):
+            metrics_callback(epoch_metrics)
+
+    avg_acc = history[-1]["train_acc"] if history else 0.0
+    avg_loss = history[-1]["train_loss"] if history else 0.0
+
+    if record_history:
+        return avg_acc, avg_loss, history
+
     return avg_acc, avg_loss
     ### END YOUR SOLUTION
+
+
+def run_cifar10_grid_search(
+    model_builder,
+    dataloader_builder,
+    base_config,
+    sweep_spec,
+    *,
+    loss_fn=nn.SoftmaxLoss,
+    optimizer=ndl.optim.Adam,
+):
+    """Run a grid search over optimizer and training hyperparameters for CIFAR-10.
+
+    Args:
+        model_builder: Callable returning a freshly initialized model.
+        dataloader_builder: Callable returning a new dataloader per run.
+        base_config: Base configuration dictionary shared across runs.
+        sweep_spec: Mapping of dotted paths to sequences of candidate values.
+        loss_fn: Optional loss module/class override.
+        optimizer: Optional optimizer class override when config lacks one.
+
+    Returns:
+        List of dictionaries containing run metadata and results.
+    """
+    results = []
+    for run_id, cfg in enumerate(config_utils.grid_sweep(base_config, sweep_spec), start=1):
+        run_config = config_utils.merge_run_config(cfg, {"return_history": True})
+        model = model_builder()
+        dataloader = dataloader_builder()
+
+        output = train_cifar10(
+            model,
+            dataloader,
+            optimizer=optimizer,
+            loss_fn=loss_fn,
+            config=run_config,
+        )
+
+        if len(output) == 3:
+            final_acc, final_loss, history = output
+        else:
+            final_acc, final_loss = output
+            history = []
+
+        results.append(
+            {
+                "run_id": run_id,
+                "config": run_config,
+                "final_acc": final_acc,
+                "final_loss": final_loss,
+                "history": history,
+            }
+        )
+
+    return results
 
 
 def evaluate_cifar10(model, dataloader, loss_fn=nn.SoftmaxLoss):

@@ -1,6 +1,123 @@
-"""Optimization module"""
+"""Optimization module with registry utilities for config-driven instantiation."""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Dict, Iterable, Sequence, Type
+import copy
+
 import needle as ndl
 import numpy as np
+
+
+@dataclass(frozen=True, slots=True)
+class _OptimizerSpec:
+    """Internal metadata describing an optimizer."""
+
+    name: str
+    cls: Type["Optimizer"]
+    defaults: Dict[str, Any] = field(default_factory=dict)
+    supports_sparse: bool = False
+    aliases: Sequence[str] = field(default_factory=tuple)
+
+
+_OPTIMIZER_REGISTRY: Dict[str, _OptimizerSpec] = {}
+
+
+def register_optimizer(
+    name: str,
+    cls: Type["Optimizer"],
+    *,
+    defaults: Dict[str, Any] | None = None,
+    aliases: Sequence[str] | None = None,
+    supports_sparse: bool = False,
+) -> None:
+    """Register an optimizer so it can be constructed from configuration.
+
+    Args:
+        name: Primary identifier used in config files.
+        cls: Optimizer class implementing the Needle optimizer interface.
+        defaults: Baseline hyperparameters applied when not overridden.
+        aliases: Optional alternative identifiers resolving to the same optimizer.
+        supports_sparse: True if the optimizer has a sparse update variant.
+    """
+    if not name:
+        raise ValueError("Optimizer name must be a non-empty string.")
+    key = name.lower()
+    if key in _OPTIMIZER_REGISTRY:
+        raise ValueError(f"Optimizer '{name}' already registered.")
+    spec = _OptimizerSpec(
+        name=name,
+        cls=cls,
+        defaults=dict(defaults or {}),
+        supports_sparse=supports_sparse,
+        aliases=tuple(aliases or ()),
+    )
+    _OPTIMIZER_REGISTRY[key] = spec
+    for alias in spec.aliases:
+        alias_key = alias.lower()
+        if alias_key in _OPTIMIZER_REGISTRY:
+            raise ValueError(f"Alias '{alias}' already registered.")
+        _OPTIMIZER_REGISTRY[alias_key] = spec
+
+
+def available_optimizers() -> Sequence[str]:
+    """Return the list of distinct optimizer identifiers."""
+    seen = set()
+    names = []
+    for spec in _OPTIMIZER_REGISTRY.values():
+        if spec.name in seen:
+            continue
+        seen.add(spec.name)
+        names.append(spec.name)
+    return tuple(sorted(names))
+
+
+def optimizer_spec(name: str) -> _OptimizerSpec:
+    """Retrieve the spec for a previously registered optimizer."""
+    try:
+        return _OPTIMIZER_REGISTRY[name.lower()]
+    except KeyError as exc:
+        registered = ", ".join(sorted(set(spec.name for spec in _OPTIMIZER_REGISTRY.values())))
+        raise KeyError(f"Unknown optimizer '{name}'. Available: {registered}") from exc
+
+
+def build_optimizer_from_config(
+    params: Iterable[ndl.Tensor],
+    config: Dict[str, Any] | str,
+) -> "Optimizer":
+    """Instantiate an optimizer using a configuration dictionary or identifier.
+
+    Args:
+        params: Iterable of parameters to optimize.
+        config: Either a string optimizer name or a dictionary containing:
+            - name (str): registered optimizer name (required if dict).
+            - Any additional keyword arguments forwarded to the optimizer.
+            - hyperparams (dict): optional nested dict merged after defaults.
+
+    Returns:
+        An initialized optimizer instance.
+    """
+    if isinstance(config, str):
+        name = config
+        cfg_dict: Dict[str, Any] = {}
+    else:
+        if "name" not in config:
+            raise KeyError("Optimizer config dictionary must contain a 'name' entry.")
+        name = config["name"]
+        cfg_dict = dict(config)
+
+    spec = optimizer_spec(name)
+
+    hyperparams = copy.deepcopy(spec.defaults)
+    cfg_dict.pop("name", None)
+    nested_hparams = cfg_dict.pop("hyperparams", {})
+    if nested_hparams:
+        if not isinstance(nested_hparams, dict):
+            raise TypeError("'hyperparams' entry must be a dictionary.")
+        hyperparams.update(nested_hparams)
+    hyperparams.update(cfg_dict)
+
+    return spec.cls(list(params), **hyperparams)
 
 
 class Optimizer:
@@ -95,3 +212,18 @@ class Adam(Optimizer):
           new_data = param.data - self.lr * ndl.ops.divide(m_hat, ndl.ops.power_scalar(v_hat, 0.5) + self.eps)
           param.data = ndl.Tensor(new_data.numpy().astype(param.dtype), dtype=param.dtype)
         ### END YOUR SOLUTION
+
+
+# Register built-in optimizers for config-driven workflows.
+register_optimizer(
+    "sgd",
+    SGD,
+    defaults={"lr": 0.01, "momentum": 0.0, "weight_decay": 0.0},
+    aliases=("stochastic_gradient_descent",),
+)
+
+register_optimizer(
+    "adam",
+    Adam,
+    defaults={"lr": 0.01, "beta1": 0.9, "beta2": 0.999, "eps": 1e-8, "weight_decay": 0.0},
+)
