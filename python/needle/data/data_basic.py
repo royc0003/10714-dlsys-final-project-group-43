@@ -49,11 +49,15 @@ class DataLoader:
         dataset: Dataset,
         batch_size: Optional[int] = 1,
         shuffle: bool = False,
+        device=None,
+        dtype=None,
     ):
 
         self.dataset = dataset
         self.shuffle = shuffle
         self.batch_size = batch_size
+        self.device = device
+        self.dtype = dtype
         if not self.shuffle:
             self.ordering = np.array_split(np.arange(len(dataset)), 
                                            range(batch_size, len(dataset), batch_size))
@@ -81,7 +85,28 @@ class DataLoader:
       if not isinstance(batch, tuple):
           batch = (batch,)
 
-      return tuple(x if isinstance(x, Tensor) else Tensor(x) for x in batch)
+      tensor_kwargs = {}
+      if self.device is not None:
+          tensor_kwargs["device"] = self.device
+      if self.dtype is not None:
+          tensor_kwargs["dtype"] = self.dtype
+
+      result = []
+      for x in batch:
+          if isinstance(x, Tensor):
+              # Always convert to numpy first to ensure clean device placement
+              x_np = x.numpy()
+              # Recreate tensor on target device
+              if tensor_kwargs:
+                  x = Tensor(x_np, requires_grad=False, **tensor_kwargs)
+              else:
+                  # If no device/dtype specified, keep original
+                  x = Tensor(x_np, requires_grad=False)
+          else:
+              # Convert numpy array or other type to Tensor on target device
+              x = Tensor(x, requires_grad=False, **tensor_kwargs)
+          result.append(x)
+      return tuple(result)
 
 
       ### END YOUR SOLUTION

@@ -1,8 +1,14 @@
 """hw1/apps/simple_ml.py"""
 
+import copy
 import struct
 import gzip
+import math
+import time
 import numpy as np
+
+from tqdm.auto import tqdm
+import apps.config_utils as config_utils
 
 import sys
 
@@ -117,7 +123,17 @@ def nn_epoch(X, y, W1, W2, lr=0.1, batch=100):
     ### END YOUR SOLUTION
 
 ### CIFAR-10 training ###
-def epoch_general_cifar10(dataloader, model, loss_fn=nn.SoftmaxLoss(), opt=None):
+def epoch_general_cifar10(
+    dataloader,
+    model,
+    loss_fn=nn.SoftmaxLoss(),
+    opt=None,
+    *,
+    progress_bar=False,
+    epoch_index=None,
+    total_epochs=None,
+    max_batches=None,
+):
     """
     Iterates over the dataloader. If optimizer is not None, sets the
     model to train mode, and for each batch updates the model parameters.
@@ -136,6 +152,9 @@ def epoch_general_cifar10(dataloader, model, loss_fn=nn.SoftmaxLoss(), opt=None)
     """
     np.random.seed(4)
     ### BEGIN YOUR SOLUTION
+    if dataloader is None:
+        raise ValueError("dataloader cannot be None")
+    
     if opt is not None:
         model.train()
     else:
@@ -145,41 +164,171 @@ def epoch_general_cifar10(dataloader, model, loss_fn=nn.SoftmaxLoss(), opt=None)
     total_loss = 0.0
     total_samples = 0
     
-    for batch in dataloader:
-        X, y = batch
+    # Setup progress bar if requested
+    pbar = None
+    use_progress = progress_bar and dataloader is not None
+    if use_progress:
+        batch_size = getattr(dataloader, "batch_size", None) or 1
+        dataset = getattr(dataloader, "dataset", None)
+        dataset_len = len(dataset) if dataset is not None else None
+        total_batches = None
+        if dataset_len is not None and batch_size:
+            total_batches = math.ceil(dataset_len / batch_size)
+        if max_batches is not None:
+            if total_batches is not None:
+                total_batches = min(total_batches, max_batches)
+            else:
+                total_batches = max_batches
         
-        if opt is not None:
-            opt.reset_grad()
+        if epoch_index is not None and total_epochs is not None:
+            desc = f"Epoch {epoch_index}/{total_epochs}"
+        elif epoch_index is not None:
+            desc = f"Epoch {epoch_index}"
+        else:
+            desc = "Epoch"
         
-        out = model(X)
-        
-        loss = loss_fn(out, y)
-        
-        # Compute accuracy
-        predictions = np.argmax(out.numpy(), axis=1)
-        y_np = y.numpy()
-        if len(y_np.shape) > 1:
-            y_np = y_np.flatten()
-        batch_correct = np.sum(predictions == y_np)
-        correct += batch_correct
-        total_samples += y_np.shape[0]
-        
-        # Accumulate loss (weighted by batch size)
-        total_loss += loss.data.numpy() * y_np.shape[0]
-        
-        if opt is not None:
-            loss.backward()
-            opt.step()
+        # Create progress bar (standalone, not wrapping dataloader)
+        if total_batches is not None:
+            pbar = tqdm(total=int(total_batches), desc=desc, leave=False)
+        else:
+            pbar = tqdm(desc=desc, leave=False)
     
-    avg_acc = correct / total_samples if total_samples > 0 else 0.0
-    avg_loss = total_loss / total_samples if total_samples > 0 else 0.0
+    batch_counter = 0
+    try:
+        for batch in dataloader:
+            if max_batches is not None and batch_counter >= max_batches:
+                break
+            
+            if pbar is not None:
+                pbar.update(1)
+            
+            batch_counter += 1
+            X, y = batch
+            
+            if opt is not None:
+                opt.reset_grad()
+            
+            out = model(X)
+            
+            loss = loss_fn(out, y)
+            
+            # Compute accuracy
+            predictions = np.argmax(out.numpy(), axis=1)
+            y_np = y.numpy()
+            if len(y_np.shape) > 1:
+                y_np = y_np.flatten()
+            batch_correct = np.sum(predictions == y_np)
+            correct += batch_correct
+            total_samples += y_np.shape[0]
+            
+            # Accumulate loss (weighted by batch size)
+            loss_val = loss.data.numpy()
+            # Convert numpy array/scalar to Python float
+            if isinstance(loss_val, np.ndarray):
+                loss_val = float(loss_val.item() if loss_val.size == 1 else loss_val)
+            else:
+                # Handle numpy scalars (np.float32, etc.)
+                loss_val = float(loss_val)
+            total_loss += loss_val * float(y_np.shape[0])
+            
+            if opt is not None:
+                loss.backward()
+                opt.step()
+    finally:
+        if use_progress and pbar is not None:
+            pbar.close()
+    
+    # Ensure all values are Python native types, not numpy scalars
+    # Use .item() for numpy scalars, float() for everything else
+    if isinstance(correct, (np.integer, np.floating)):
+        correct = float(correct.item())
+    else:
+        correct = float(correct)
+    
+    if isinstance(total_samples, (np.integer, np.floating)):
+        total_samples = float(total_samples.item())
+    else:
+        total_samples = float(total_samples)
+    
+    if isinstance(total_loss, (np.integer, np.floating)):
+        total_loss = float(total_loss.item())
+    else:
+        total_loss = float(total_loss)
+    
+    avg_acc = float(correct / total_samples) if total_samples > 0 else 0.0
+    avg_loss = float(total_loss / total_samples) if total_samples > 0 else 0.0
     
     return avg_acc, avg_loss
     ### END YOUR SOLUTION
 
 
+def _instantiate_loss(loss_fn, loss_config):
+    """Instantiate a loss module from configuration or fallback value."""
+    if loss_config is None:
+        return loss_fn() if isinstance(loss_fn, type) else loss_fn
+
+    if isinstance(loss_config, nn.Module):
+        return loss_config
+
+    if isinstance(loss_config, str):
+        if not hasattr(nn, loss_config):
+            raise AttributeError(f"needle.nn has no loss named '{loss_config}'.")
+        loss_cls = getattr(nn, loss_config)
+        return loss_cls()
+
+    if isinstance(loss_config, dict):
+        loss_cfg = dict(loss_config)
+        if "callable" in loss_cfg:
+            factory = loss_cfg.pop("callable")
+            if callable(factory):
+                return factory(**loss_cfg)
+            raise TypeError("'callable' entry in loss config must be callable.")
+        name = loss_cfg.pop("name", None)
+        if name is None:
+            raise KeyError("Loss config must include a 'name' when provided as a dict.")
+        if not hasattr(nn, name):
+            raise AttributeError(f"needle.nn has no loss named '{name}'.")
+        loss_cls = getattr(nn, name)
+        return loss_cls(**loss_cfg)
+
+    if callable(loss_config):
+        return loss_config()
+
+    raise TypeError("Unsupported loss configuration type.")
+
+
+def _resolve_optimizer(model, optimizer, lr, weight_decay, config):
+    """Return an optimizer instance based on explicit args or configuration.
+    
+    Priority order:
+    1. If config["optimizer"] exists, use it (config takes precedence)
+    2. If optimizer is an Optimizer instance, use it
+    3. If optimizer is a callable (class), instantiate it with lr and weight_decay
+    4. Otherwise raise TypeError
+    """
+    # Config takes highest priority - if optimizer is specified in config, use it
+    optimizer_cfg = None if config is None else config.get("optimizer")
+    if optimizer_cfg is not None:
+        return ndl.optim.build_optimizer_from_config(model.parameters(), optimizer_cfg)
+
+    # If no config optimizer, fall back to explicit optimizer parameter
+    if optimizer is None:
+        raise ValueError(
+            "optimizer must be provided either as a parameter or in config['optimizer']. "
+            "If using config, set config['optimizer'] = {'name': 'adam', ...}"
+        )
+    
+    if isinstance(optimizer, ndl.optim.Optimizer):
+        return optimizer
+
+    if not callable(optimizer):
+        raise TypeError("optimizer must be an Optimizer instance or class when config is not provided.")
+
+    return optimizer(model.parameters(), lr=lr, weight_decay=weight_decay)
+
+
 def train_cifar10(model, dataloader, n_epochs=1, optimizer=ndl.optim.Adam,
-        lr=0.001, weight_decay=0.001, loss_fn=nn.SoftmaxLoss):
+        lr=0.001, weight_decay=0.001, loss_fn=nn.SoftmaxLoss, config=None, metrics_callback=None):
     """
     Performs {n_epochs} epochs of training.
 
@@ -187,25 +336,148 @@ def train_cifar10(model, dataloader, n_epochs=1, optimizer=ndl.optim.Adam,
         dataloader: Dataloader instance
         model: nn.Module instance
         n_epochs: number of epochs (int)
-        optimizer: Optimizer class
-        lr: learning rate (float)
-        weight_decay: weight decay (float)
-        loss_fn: nn.Module class
+        optimizer: Optimizer class or instance. Ignored when config["optimizer"] is provided.
+        lr: learning rate (float). Overrides default when not set in config.
+        weight_decay: weight decay (float). Overrides default when not set in config.
+        loss_fn: nn.Module class or instance
+        config: Optional dictionary describing run/optimizer/loss configuration.
+        metrics_callback: Optional callable receiving per-epoch metric dictionaries.
 
     Returns:
-        avg_acc: average accuracy over dataset from last epoch of training
-        avg_loss: average loss over dataset from last epoch of training
+        avg_acc: average accuracy over dataset from last epoch of training.
+        avg_loss: average loss over dataset from last epoch of training.
+        history (optional): when config["return_history"] is True, a list of per-epoch metric dicts.
     """
-    np.random.seed(4)
-    ### BEGIN YOUR SOLUTION
-    opt = optimizer(model.parameters(), lr=lr, weight_decay=weight_decay)
-    loss_fn_instance = loss_fn()
-    
+    config = copy.deepcopy(config) if config is not None else {}
+
+    run_config = config.get("run", {})
+    if run_config and not isinstance(run_config, dict):
+        raise TypeError("'run' section of config must be a dictionary if provided.")
+
+    seed = run_config.get("seed", 4)
+    np.random.seed(seed)
+    epochs_override = run_config.get("epochs")
+    if epochs_override is not None:
+        n_epochs = epochs_override
+
+    if n_epochs <= 0:
+        raise ValueError("Number of epochs must be positive.")
+
+    record_history = config.get("return_history", False)
+    history = []
+
+    opt = _resolve_optimizer(model, optimizer, lr, weight_decay, config)
+    loss_cfg = config.get("loss")
+    loss_fn_instance = _instantiate_loss(loss_fn, loss_cfg)
+    progress_enabled = config.get("progress_bar", False)
+    max_batches = run_config.get("max_batches")
+    verbose = run_config.get("verbose", True)
+
     for epoch in range(n_epochs):
-        avg_acc, avg_loss = epoch_general_cifar10(dataloader, model, loss_fn=loss_fn_instance, opt=opt)
-    
+        start_time = time.time()
+        if verbose:
+            info_prefix = f"[Epoch {epoch + 1}/{n_epochs}]"
+            if max_batches:
+                print(f"{info_prefix} starting ({max_batches} batches cap)...")
+            else:
+                print(f"{info_prefix} starting...")
+        train_acc, train_loss = epoch_general_cifar10(
+            dataloader,
+            model,
+            loss_fn=loss_fn_instance,
+            opt=opt,
+            progress_bar=progress_enabled,
+            epoch_index=epoch + 1,
+            total_epochs=n_epochs,
+            max_batches=max_batches,
+        )
+        # Ensure metrics are Python floats for downstream consumers / logging
+        if isinstance(train_acc, (np.ndarray, np.integer, np.floating)):
+            train_acc = float(np.asarray(train_acc).item())
+        else:
+            train_acc = float(train_acc)
+        if isinstance(train_loss, (np.ndarray, np.integer, np.floating)):
+            train_loss = float(np.asarray(train_loss).item())
+        else:
+            train_loss = float(train_loss)
+        elapsed = time.time() - start_time
+        if verbose:
+            print(f"[Epoch {epoch + 1}/{n_epochs}] finished in {elapsed:.2f}s")
+        epoch_metrics = {
+            "epoch": epoch + 1,
+            "train_acc": train_acc,
+            "train_loss": train_loss,
+            "learning_rate": getattr(opt, "lr", lr),
+            "duration_sec": elapsed,
+            "max_batches": max_batches,
+        }
+        history.append(epoch_metrics)
+        if callable(metrics_callback):
+            metrics_callback(epoch_metrics)
+
+    avg_acc = history[-1]["train_acc"] if history else 0.0
+    avg_loss = history[-1]["train_loss"] if history else 0.0
+
+    if record_history:
+        return avg_acc, avg_loss, history
+
     return avg_acc, avg_loss
     ### END YOUR SOLUTION
+
+
+def run_cifar10_grid_search(
+    model_builder,
+    dataloader_builder,
+    base_config,
+    sweep_spec,
+    *,
+    loss_fn=nn.SoftmaxLoss,
+    optimizer=ndl.optim.Adam,
+):
+    """Run a grid search over optimizer and training hyperparameters for CIFAR-10.
+
+    Args:
+        model_builder: Callable returning a freshly initialized model.
+        dataloader_builder: Callable returning a new dataloader per run.
+        base_config: Base configuration dictionary shared across runs.
+        sweep_spec: Mapping of dotted paths to sequences of candidate values.
+        loss_fn: Optional loss module/class override.
+        optimizer: Optional optimizer class override when config lacks one.
+
+    Returns:
+        List of dictionaries containing run metadata and results.
+    """
+    results = []
+    for run_id, cfg in enumerate(config_utils.grid_sweep(base_config, sweep_spec), start=1):
+        run_config = config_utils.merge_run_config(cfg, {"return_history": True})
+        model = model_builder()
+        dataloader = dataloader_builder()
+
+        output = train_cifar10(
+            model,
+            dataloader,
+            optimizer=optimizer,
+            loss_fn=loss_fn,
+            config=run_config,
+        )
+
+        if len(output) == 3:
+            final_acc, final_loss, history = output
+        else:
+            final_acc, final_loss = output
+            history = []
+
+        results.append(
+            {
+                "run_id": run_id,
+                "config": run_config,
+                "final_acc": final_acc,
+                "final_loss": final_loss,
+                "history": history,
+            }
+        )
+
+    return results
 
 
 def evaluate_cifar10(model, dataloader, loss_fn=nn.SoftmaxLoss):
@@ -224,7 +496,14 @@ def evaluate_cifar10(model, dataloader, loss_fn=nn.SoftmaxLoss):
     np.random.seed(4)
     ### BEGIN YOUR SOLUTION
     loss_fn_instance = loss_fn()
-    avg_acc, avg_loss = epoch_general_cifar10(dataloader, model, loss_fn=loss_fn_instance, opt=None)
+    avg_acc, avg_loss = epoch_general_cifar10(
+        dataloader,
+        model,
+        loss_fn=loss_fn_instance,
+        opt=None,
+        progress_bar=False,
+        max_batches=None,
+    )
     return avg_acc, avg_loss
     ### END YOUR SOLUTION
 
