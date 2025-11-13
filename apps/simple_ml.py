@@ -4,6 +4,7 @@ import copy
 import struct
 import gzip
 import math
+import time
 import numpy as np
 
 from tqdm.auto import tqdm
@@ -131,6 +132,7 @@ def epoch_general_cifar10(
     progress_bar=False,
     epoch_index=None,
     total_epochs=None,
+    max_batches=None,
 ):
     """
     Iterates over the dataloader. If optimizer is not None, sets the
@@ -165,6 +167,11 @@ def epoch_general_cifar10(
         total_batches = None
         if dataset_len is not None and batch_size:
             total_batches = math.ceil(dataset_len / batch_size)
+        if max_batches is not None:
+            if total_batches is not None:
+                total_batches = min(total_batches, max_batches)
+            else:
+                total_batches = max_batches
         if epoch_index is not None and total_epochs is not None:
             desc = f"Epoch {epoch_index}/{total_epochs}"
         elif epoch_index is not None:
@@ -173,7 +180,11 @@ def epoch_general_cifar10(
             desc = "Epoch"
         iterator = tqdm(dataloader, total=total_batches, desc=desc, leave=False)
     
+    batch_counter = 0
     for batch in iterator:
+        if max_batches is not None and batch_counter >= max_batches:
+            break
+        batch_counter += 1
         X, y = batch
         
         if opt is not None:
@@ -299,8 +310,17 @@ def train_cifar10(model, dataloader, n_epochs=1, optimizer=ndl.optim.Adam,
     loss_cfg = config.get("loss")
     loss_fn_instance = _instantiate_loss(loss_fn, loss_cfg)
     progress_enabled = config.get("progress_bar", False)
+    max_batches = run_config.get("max_batches")
+    verbose = run_config.get("verbose", True)
 
     for epoch in range(n_epochs):
+        start_time = time.time()
+        if verbose:
+            info_prefix = f"[Epoch {epoch + 1}/{n_epochs}]"
+            if max_batches:
+                print(f"{info_prefix} starting ({max_batches} batches cap)...")
+            else:
+                print(f"{info_prefix} starting...")
         train_acc, train_loss = epoch_general_cifar10(
             dataloader,
             model,
@@ -309,12 +329,18 @@ def train_cifar10(model, dataloader, n_epochs=1, optimizer=ndl.optim.Adam,
             progress_bar=progress_enabled,
             epoch_index=epoch + 1,
             total_epochs=n_epochs,
+            max_batches=max_batches,
         )
+        elapsed = time.time() - start_time
+        if verbose:
+            print(f"[Epoch {epoch + 1}/{n_epochs}] finished in {elapsed:.2f}s")
         epoch_metrics = {
             "epoch": epoch + 1,
             "train_acc": train_acc,
             "train_loss": train_loss,
             "learning_rate": getattr(opt, "lr", lr),
+            "duration_sec": elapsed,
+            "max_batches": max_batches,
         }
         history.append(epoch_metrics)
         if callable(metrics_callback):
@@ -407,6 +433,7 @@ def evaluate_cifar10(model, dataloader, loss_fn=nn.SoftmaxLoss):
         loss_fn=loss_fn_instance,
         opt=None,
         progress_bar=False,
+        max_batches=None,
     )
     return avg_acc, avg_loss
     ### END YOUR SOLUTION
