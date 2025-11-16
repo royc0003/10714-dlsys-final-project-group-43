@@ -214,6 +214,69 @@ class Adam(Optimizer):
         ### END YOUR SOLUTION
 
 
+class AdamW(Optimizer):
+    def __init__(
+        self,
+        params,
+        lr=0.01,
+        beta1=0.9,
+        beta2=0.999,
+        eps=1e-8,
+        weight_decay=0.0,
+    ):
+        super().__init__(params)
+        self.lr = lr
+        self.beta1 = beta1
+        self.beta2 = beta2
+        self.eps = eps
+        self.weight_decay = weight_decay
+        self.t = 0
+
+        self.m = {}
+        self.v = {}
+        for param in self.params:
+            param_key = hash(param)
+            self.m[param_key] = ndl.zeros_like(param.data)
+            self.v[param_key] = ndl.zeros_like(param.data)
+
+    def step(self):
+        ### BEGIN YOUR SOLUTION
+        self.t += 1
+        bias_correction1 = 1 - self.beta1 ** self.t
+        bias_correction2 = 1 - self.beta2 ** self.t
+
+        for param in self.params:
+            if param.grad is None:
+                continue
+
+            param_key = hash(param)
+            if param_key not in self.m:
+                self.m[param_key] = ndl.zeros_like(param.data)
+                self.v[param_key] = ndl.zeros_like(param.data)
+
+            grad = param.grad.data
+            m_prev = self.m[param_key]
+            v_prev = self.v[param_key]
+
+            m = self.beta1 * m_prev + (1 - self.beta1) * grad
+            v = self.beta2 * v_prev + (1 - self.beta2) * (grad * grad)
+            self.m[param_key] = m
+            self.v[param_key] = v
+
+            m_hat = m / bias_correction1
+            v_hat = v / bias_correction2
+
+            denom = ndl.ops.power_scalar(v_hat, 0.5) + self.eps
+            adam_step = ndl.ops.divide(m_hat, denom)
+
+            if self.weight_decay != 0.0:
+                adam_step = adam_step + self.weight_decay * param.data
+
+            new_data = param.data - self.lr * adam_step
+            param.data = ndl.Tensor(new_data.numpy().astype(param.dtype), dtype=param.dtype)
+        ### END YOUR SOLUTION
+
+
 # Register built-in optimizers for config-driven workflows.
 register_optimizer(
     "sgd",
@@ -225,5 +288,11 @@ register_optimizer(
 register_optimizer(
     "adam",
     Adam,
+    defaults={"lr": 0.01, "beta1": 0.9, "beta2": 0.999, "eps": 1e-8, "weight_decay": 0.0},
+)
+
+register_optimizer(
+    "adamw",
+    AdamW,
     defaults={"lr": 0.01, "beta1": 0.9, "beta2": 0.999, "eps": 1e-8, "weight_decay": 0.0},
 )
