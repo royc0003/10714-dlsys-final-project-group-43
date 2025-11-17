@@ -503,9 +503,9 @@ class AdaBelief(Optimizer):
             self.m[param_key] = m
 
             # Update second moment estimate (variance of prediction error)
-            # s = beta2 * s + (1 - beta2) * (gradient - m)^2
-            # Note: Using current m (not m_prev) as per standard AdaBelief algorithm
-            prediction_error = gradient - m
+            # s = beta2 * s + (1 - beta2) * (gradient - m_prev)^2
+            # Using m_prev (previous moment) as the prediction from previous step
+            prediction_error = gradient - m_prev
             s = self.beta2 * self.s[param_key] + (1 - self.beta2) * (
                 prediction_error * prediction_error
             )
