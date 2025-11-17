@@ -602,7 +602,9 @@ def _grid_search_callback(metrics, history, test_metrics, model, test_loader, lo
     })
     
     if verbose:
-        print(f"  Epoch {metrics['epoch']:02d}: Train {metrics['train_acc']*100:.1f}% / Test {test_acc*100:.1f}%")
+        print(f"  Epoch {metrics['epoch']:02d}: "
+              f"Train Acc {metrics['train_acc']*100:.1f}% Loss {metrics['train_loss']:.4f} | "
+              f"Test Acc {test_acc*100:.1f}% Loss {test_loss:.4f}")
 
 
 def _find_best_run(results, metric_for_best):
