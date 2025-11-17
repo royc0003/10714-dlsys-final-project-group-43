@@ -157,9 +157,10 @@ def epoch_general_cifar10(
     
     if opt is not None:
         model.train()
+        print("DEBUG: Model is in train mode")
     else:
         model.eval()
-    
+        print("DEBUG: Model is in eval mode")
     correct = 0
     total_loss = 0.0
     total_samples = 0
