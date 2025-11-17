@@ -508,6 +508,35 @@ def evaluate_cifar10(model, dataloader, loss_fn=nn.SoftmaxLoss):
     ### END YOUR SOLUTION
 
 
+def split_cifar10_train_test(dataset, train_ratio=0.8, seed=42):
+    """
+    Split a CIFAR-10 dataset into train and test subsets.
+    
+    Args:
+        dataset: CIFAR10Dataset instance
+        train_ratio: Ratio of data to use for training (default 0.8 for 80%)
+        seed: Random seed for reproducibility
+        
+    Returns:
+        train_dataset: Subset for training
+        test_dataset: Subset for testing
+    """
+    np.random.seed(seed)
+    total_size = len(dataset)
+    indices = np.arange(total_size)
+    np.random.shuffle(indices)
+    
+    train_size = int(total_size * train_ratio)
+    train_indices = indices[:train_size]
+    test_indices = indices[train_size:]
+    
+    # Create subset datasets
+    train_dataset = ndl.data.DatasetSubset(dataset, train_indices)
+    test_dataset = ndl.data.DatasetSubset(dataset, test_indices)
+    
+    return train_dataset, test_dataset
+
+
 ### PTB training ###
 def epoch_general_ptb(data, model, seq_len=40, loss_fn=nn.SoftmaxLoss, opt=None,
         clip=None, device=None, dtype="float32"):
