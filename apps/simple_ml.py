@@ -531,8 +531,8 @@ def split_cifar10_train_test(dataset, train_ratio=0.8, seed=42):
     test_indices = indices[train_size:]
     
     # Create subset datasets
-    train_dataset = ndl.data.datasets.DatasetSubset(dataset, train_indices)
-    test_dataset = ndl.data.datasets.DatasetSubset(dataset, test_indices)
+    train_dataset = ndl.data.DatasetSubset(dataset, train_indices)
+    test_dataset = ndl.data.DatasetSubset(dataset, test_indices)
     
     return train_dataset, test_dataset
 
