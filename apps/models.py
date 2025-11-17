@@ -11,59 +11,42 @@ np.random.seed(0)
 
 
 class ResNet9(ndl.nn.Module):
-    def __init__(self, device=None, dtype="float32", dropout_p=0.2):
+    def __init__(self, device=None, dtype="float32"):
         super().__init__()
         ### BEGIN YOUR SOLUTION ###
         self.ConvBN_0 = nn.Sequential(
-            nn.Conv(3, 16, 7, 4, device=device, dtype=dtype),
-            nn.BatchNorm2d(16, device=device, dtype=dtype),
-            nn.ReLU(),
-            nn.Dropout(dropout_p),
+            nn.Conv(3, 16, 7, 4, device=device, dtype=dtype), 
+            nn.BatchNorm2d(16, device=device, dtype=dtype), nn.ReLU(),
             nn.Conv(16, 32, 3, 2, device=device, dtype=dtype),
-            nn.BatchNorm2d(32, device=device, dtype=dtype),
-            nn.ReLU(),
-            nn.Dropout(dropout_p),
+            nn.BatchNorm2d(32, device=device, dtype=dtype), nn.ReLU()
         )
         self.ConvBN_1 = nn.Residual(
             nn.Sequential(
+                nn.Conv(32, 32, 3, 1, device=device, dtype=dtype), 
+                nn.BatchNorm2d(32, device=device, dtype=dtype), nn.ReLU(),
                 nn.Conv(32, 32, 3, 1, device=device, dtype=dtype),
-                nn.BatchNorm2d(32, device=device, dtype=dtype),
-                nn.ReLU(),
-                nn.Dropout(dropout_p),
-                nn.Conv(32, 32, 3, 1, device=device, dtype=dtype),
-                nn.BatchNorm2d(32, device=device, dtype=dtype),
-                nn.ReLU(),
-                nn.Dropout(dropout_p),
+                nn.BatchNorm2d(32, device=device, dtype=dtype), nn.ReLU()
             )
         )
         self.ConvBN_2 = nn.Sequential(
-            nn.Conv(32, 64, 3, 2, device=device, dtype=dtype),
-            nn.BatchNorm2d(64, device=device, dtype=dtype),
-            nn.ReLU(),
-            nn.Dropout(dropout_p),
+            nn.Conv(32, 64, 3, 2, device=device, dtype=dtype), 
+            nn.BatchNorm2d(64, device=device, dtype=dtype), nn.ReLU(),
             nn.Conv(64, 128, 3, 2, device=device, dtype=dtype),
-            nn.BatchNorm2d(128, device=device, dtype=dtype),
-            nn.ReLU(),
-            nn.Dropout(dropout_p),
+            nn.BatchNorm2d(128, device=device, dtype=dtype), nn.ReLU()
         )
         self.ConvBN_3 = nn.Residual(
             nn.Sequential(
-                nn.Conv(128, 128, 3, 1, device=device, dtype=dtype),
-                nn.BatchNorm2d(128, device=device, dtype=dtype),
-                nn.ReLU(),
-                nn.Dropout(dropout_p),
-                nn.Conv(128, 128, 3, 1, device=device, dtype=dtype),
-                nn.BatchNorm2d(128, device=device, dtype=dtype),
-                nn.ReLU(),
-                nn.Dropout(dropout_p),
+                nn.Conv(128, 128, 3, 1, device=device, dtype=dtype), 
+                nn.BatchNorm2d(128, device=device, dtype=dtype), nn.ReLU(),
+                nn.Conv(128, 128, 3, 1, device=device, dtype=dtype), 
+                nn.BatchNorm2d(128, device=device, dtype=dtype), nn.ReLU()
             )
         )
         self.Linear = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(128, 128, device=device, dtype=dtype),
-            nn.ReLU(),
-            nn.Dropout(0.5),  # Higher dropout rate for fully connected layers
-            nn.Linear(128, 10, device=device, dtype=dtype),
+            nn.Linear(128, 128, device=device, dtype=dtype), 
+            nn.ReLU(), 
+            nn.Linear(128, 10, device=device, dtype=dtype)
         )
         ### END YOUR SOLUTION
 

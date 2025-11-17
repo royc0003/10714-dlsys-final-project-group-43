@@ -157,9 +157,10 @@ def epoch_general_cifar10(
     
     if opt is not None:
         model.train()
+        print("DEBUG: Model is in train mode")
     else:
         model.eval()
-    
+        print("DEBUG: Model is in eval mode")
     correct = 0
     total_loss = 0.0
     total_samples = 0
@@ -433,51 +434,232 @@ def run_cifar10_grid_search(
     *,
     loss_fn=nn.SoftmaxLoss,
     optimizer=ndl.optim.Adam,
+    metric_for_best="test_acc",
+    verbose=True,
 ):
     """Run a grid search over optimizer and training hyperparameters for CIFAR-10.
+    
+    Performs proper train-test split evaluation for each configuration and identifies
+    the best performing setup based on test metrics.
 
     Args:
         model_builder: Callable returning a freshly initialized model.
-        dataloader_builder: Callable returning a new dataloader per run.
+        dataloader_builder: Callable returning tuple (train_loader, test_loader).
         base_config: Base configuration dictionary shared across runs.
         sweep_spec: Mapping of dotted paths to sequences of candidate values.
+                   Example: {"optimizer.lr": [1e-3, 5e-4], "optimizer.weight_decay": [1e-4, 5e-4]}
         loss_fn: Optional loss module/class override.
         optimizer: Optional optimizer class override when config lacks one.
+        metric_for_best: Metric to use for selecting best config. Options:
+                        "test_acc" (default), "test_loss", "train_acc", "train_loss"
+        verbose: Print progress and results for each run.
 
     Returns:
-        List of dictionaries containing run metadata and results.
+        dict with keys:
+            - "results": List of dicts containing run metadata and results
+            - "best_run": Dict containing the best performing run
+            - "best_config": Configuration that achieved best performance
+            - "summary": Summary statistics across all runs
     """
+    from functools import partial
+    
     results = []
-    for run_id, cfg in enumerate(config_utils.grid_sweep(base_config, sweep_spec), start=1):
-        run_config = config_utils.merge_run_config(cfg, {"return_history": True})
-        model = model_builder()
-        dataloader = dataloader_builder()
-
-        output = train_cifar10(
-            model,
-            dataloader,
-            optimizer=optimizer,
-            loss_fn=loss_fn,
-            config=run_config,
-        )
-
-        if len(output) == 3:
-            final_acc, final_loss, history = output
-        else:
-            final_acc, final_loss = output
+    total_runs = len(list(config_utils.grid_sweep(base_config, sweep_spec)))
+    
+    if verbose:
+        print(f"\n{'='*70}")
+        print(f"Starting Grid Search: {total_runs} configurations to test")
+        print(f"Optimizing for: {metric_for_best}")
+        print(f"{'='*70}\n")
+    
+    # Create progress bar for grid search runs
+    grid_pbar = tqdm(total=total_runs, desc="Grid Search Progress", leave=True) if verbose else None
+    
+    try:
+        for run_id, cfg in enumerate(config_utils.grid_sweep(base_config, sweep_spec), start=1):
+            # Ensure history is returned
+            run_config = config_utils.merge_run_config(cfg, {"return_history": True})
+            
+            if verbose:
+                print(f"\n--- Run {run_id}/{total_runs} ---")
+                print(f"Config: {_format_config_summary(run_config)}")
+            
+            # Create fresh model and loaders for this run
+            model = model_builder()
+            train_loader, test_loader = dataloader_builder()
+            
+            # Track test metrics during training
             history = []
-
-        results.append(
-            {
+            test_metrics = []
+            
+            # Create callback to evaluate on test set each epoch
+            metrics_callback = partial(
+                _grid_search_callback,
+                history=history,
+                test_metrics=test_metrics,
+                model=model,
+                test_loader=test_loader,
+                loss_fn=loss_fn,
+                verbose=verbose,
+            )
+            
+            # Train with test evaluation
+            output = train_cifar10(
+                model,
+                train_loader,
+                optimizer=optimizer,
+                loss_fn=loss_fn,
+                config=run_config,
+                metrics_callback=metrics_callback,
+            )
+            
+            if len(output) == 3:
+                final_train_acc, final_train_loss, training_history = output
+            else:
+                final_train_acc, final_train_loss = output
+                training_history = []
+            
+            # Get final test metrics
+            final_test_acc = test_metrics[-1]["test_acc"] if test_metrics else 0.0
+            final_test_loss = test_metrics[-1]["test_loss"] if test_metrics else float('inf')
+            
+            # Get best test metrics across all epochs
+            best_test_acc = max([m["test_acc"] for m in test_metrics]) if test_metrics else 0.0
+            best_test_loss = min([m["test_loss"] for m in test_metrics]) if test_metrics else float('inf')
+            best_test_epoch = max(range(len(test_metrics)), key=lambda i: test_metrics[i]["test_acc"]) + 1 if test_metrics else 0
+            
+            result = {
                 "run_id": run_id,
                 "config": run_config,
-                "final_acc": final_acc,
-                "final_loss": final_loss,
+                "final_train_acc": final_train_acc,
+                "final_train_loss": final_train_loss,
+                "final_test_acc": final_test_acc,
+                "final_test_loss": final_test_loss,
+                "best_test_acc": best_test_acc,
+                "best_test_loss": best_test_loss,
+                "best_test_epoch": best_test_epoch,
                 "history": history,
+                "test_metrics": test_metrics,
             }
-        )
+            
+            results.append(result)
+            
+            if verbose:
+                print(f"  Final → Train: {final_train_acc*100:.2f}% / Test: {final_test_acc*100:.2f}%")
+                print(f"  Best Test: {best_test_acc*100:.2f}% (epoch {best_test_epoch})")
+            
+            # Update progress bar
+            if grid_pbar is not None:
+                grid_pbar.update(1)
+                grid_pbar.set_postfix({
+                    'best_test': f'{best_test_acc*100:.1f}%',
+                    'run': f'{run_id}/{total_runs}'
+                })
+    finally:
+        # Close progress bar
+        if grid_pbar is not None:
+            grid_pbar.close()
+    
+    # Find best configuration
+    best_run = _find_best_run(results, metric_for_best)
+    
+    if verbose:
+        print(f"\n{'='*70}")
+        print(f"Grid Search Complete!")
+        print(f"{'='*70}")
+        print(f"Best Run: #{best_run['run_id']}")
+        print(f"Best {metric_for_best}: {best_run.get(metric_for_best, 0)*100:.2f}%")
+        print(f"Config: {_format_config_summary(best_run['config'])}")
+        print(f"{'='*70}\n")
+    
+    # Create summary statistics
+    summary = _create_summary_stats(results, metric_for_best)
+    
+    return {
+        "results": results,
+        "best_run": best_run,
+        "best_config": best_run["config"],
+        "summary": summary,
+    }
 
-    return results
+
+def _grid_search_callback(metrics, history, test_metrics, model, test_loader, loss_fn, verbose=False):
+    """Internal callback for grid search to evaluate on test set."""
+    # Evaluate on test set
+    test_acc, test_loss = evaluate_cifar10(model, test_loader, loss_fn=loss_fn)
+    
+    # Add test metrics to the training metrics dict
+    metrics["test_acc"] = test_acc
+    metrics["test_loss"] = test_loss
+    
+    # Append to history
+    history.append(metrics.copy())
+    
+    # Append test-only metrics
+    test_metrics.append({
+        "epoch": metrics["epoch"],
+        "test_acc": test_acc,
+        "test_loss": test_loss,
+    })
+    
+    if verbose:
+        print(f"  Epoch {metrics['epoch']:02d}: "
+              f"Train Acc {metrics['train_acc']*100:.1f}% Loss {metrics['train_loss']:.4f} | "
+              f"Test Acc {test_acc*100:.1f}% Loss {test_loss:.4f}")
+
+
+def _find_best_run(results, metric_for_best):
+    """Find the best run based on specified metric."""
+    if not results:
+        return None
+    
+    # For accuracy metrics, higher is better
+    if "acc" in metric_for_best:
+        return max(results, key=lambda r: r.get(metric_for_best, 0))
+    # For loss metrics, lower is better
+    else:
+        return min(results, key=lambda r: r.get(metric_for_best, float('inf')))
+
+
+def _format_config_summary(config):
+    """Format config for readable display."""
+    opt = config.get("optimizer", {})
+    run = config.get("run", {})
+    summary_parts = []
+    
+    if "name" in opt:
+        summary_parts.append(f"opt={opt['name']}")
+    if "lr" in opt:
+        summary_parts.append(f"lr={opt['lr']}")
+    if "weight_decay" in opt:
+        summary_parts.append(f"wd={opt['weight_decay']}")
+    if "epochs" in run:
+        summary_parts.append(f"epochs={run['epochs']}")
+    
+    return ", ".join(summary_parts) if summary_parts else "default"
+
+
+def _create_summary_stats(results, metric_for_best):
+    """Create summary statistics across all runs."""
+    if not results:
+        return {}
+    
+    test_accs = [r["final_test_acc"] for r in results]
+    test_losses = [r["final_test_loss"] for r in results]
+    best_test_accs = [r["best_test_acc"] for r in results]
+    
+    return {
+        "total_runs": len(results),
+        "metric_optimized": metric_for_best,
+        "test_acc_mean": np.mean(test_accs),
+        "test_acc_std": np.std(test_accs),
+        "test_acc_min": np.min(test_accs),
+        "test_acc_max": np.max(test_accs),
+        "best_test_acc_mean": np.mean(best_test_accs),
+        "best_test_acc_max": np.max(best_test_accs),
+        "test_loss_mean": np.mean(test_losses),
+        "test_loss_std": np.std(test_losses),
+    }
 
 
 def evaluate_cifar10(model, dataloader, loss_fn=nn.SoftmaxLoss):
