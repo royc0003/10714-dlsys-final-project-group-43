@@ -1,50 +1,69 @@
 import sys
-sys.path.append('./python')
+
+sys.path.append("./python")
 import needle as ndl
 import needle.nn as nn
 from needle import ops
 import math
 import numpy as np
+
 np.random.seed(0)
 
 
 class ResNet9(ndl.nn.Module):
-    def __init__(self, device=None, dtype="float32"):
+    def __init__(self, device=None, dtype="float32", dropout_p=0.2):
         super().__init__()
         ### BEGIN YOUR SOLUTION ###
         self.ConvBN_0 = nn.Sequential(
-            nn.Conv(3, 16, 7, 4, device=device, dtype=dtype), 
-            nn.BatchNorm2d(16, device=device, dtype=dtype), nn.ReLU(),
+            nn.Conv(3, 16, 7, 4, device=device, dtype=dtype),
+            nn.BatchNorm2d(16, device=device, dtype=dtype),
+            nn.ReLU(),
+            nn.Dropout(dropout_p),
             nn.Conv(16, 32, 3, 2, device=device, dtype=dtype),
-            nn.BatchNorm2d(32, device=device, dtype=dtype), nn.ReLU()
+            nn.BatchNorm2d(32, device=device, dtype=dtype),
+            nn.ReLU(),
+            nn.Dropout(dropout_p),
         )
         self.ConvBN_1 = nn.Residual(
             nn.Sequential(
-                nn.Conv(32, 32, 3, 1, device=device, dtype=dtype), 
-                nn.BatchNorm2d(32, device=device, dtype=dtype), nn.ReLU(),
                 nn.Conv(32, 32, 3, 1, device=device, dtype=dtype),
-                nn.BatchNorm2d(32, device=device, dtype=dtype), nn.ReLU()
+                nn.BatchNorm2d(32, device=device, dtype=dtype),
+                nn.ReLU(),
+                nn.Dropout(dropout_p),
+                nn.Conv(32, 32, 3, 1, device=device, dtype=dtype),
+                nn.BatchNorm2d(32, device=device, dtype=dtype),
+                nn.ReLU(),
+                nn.Dropout(dropout_p),
             )
         )
         self.ConvBN_2 = nn.Sequential(
-            nn.Conv(32, 64, 3, 2, device=device, dtype=dtype), 
-            nn.BatchNorm2d(64, device=device, dtype=dtype), nn.ReLU(),
+            nn.Conv(32, 64, 3, 2, device=device, dtype=dtype),
+            nn.BatchNorm2d(64, device=device, dtype=dtype),
+            nn.ReLU(),
+            nn.Dropout(dropout_p),
             nn.Conv(64, 128, 3, 2, device=device, dtype=dtype),
-            nn.BatchNorm2d(128, device=device, dtype=dtype), nn.ReLU()
+            nn.BatchNorm2d(128, device=device, dtype=dtype),
+            nn.ReLU(),
+            nn.Dropout(dropout_p),
         )
         self.ConvBN_3 = nn.Residual(
             nn.Sequential(
-                nn.Conv(128, 128, 3, 1, device=device, dtype=dtype), 
-                nn.BatchNorm2d(128, device=device, dtype=dtype), nn.ReLU(),
-                nn.Conv(128, 128, 3, 1, device=device, dtype=dtype), 
-                nn.BatchNorm2d(128, device=device, dtype=dtype), nn.ReLU()
+                nn.Conv(128, 128, 3, 1, device=device, dtype=dtype),
+                nn.BatchNorm2d(128, device=device, dtype=dtype),
+                nn.ReLU(),
+                nn.Dropout(dropout_p),
+                nn.Conv(128, 128, 3, 1, device=device, dtype=dtype),
+                nn.BatchNorm2d(128, device=device, dtype=dtype),
+                nn.ReLU(),
+                nn.Dropout(dropout_p),
             )
         )
         self.Linear = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(128, 128, device=device, dtype=dtype), 
-            nn.ReLU(), 
-            nn.Linear(128, 10, device=device, dtype=dtype)
+            nn.Linear(128, 128, device=device, dtype=dtype),
+            nn.ReLU(),
+            nn.Dropout(0.5),  # Higher dropout rate for fully connected layers
+            nn.Linear(128, 10, device=device, dtype=dtype),
         )
         ### END YOUR SOLUTION
 
@@ -60,8 +79,17 @@ class ResNet9(ndl.nn.Module):
 
 
 class LanguageModel(nn.Module):
-    def __init__(self, embedding_size, output_size, hidden_size, num_layers=1,
-                 seq_model='rnn', seq_len=40, device=None, dtype="float32"):
+    def __init__(
+        self,
+        embedding_size,
+        output_size,
+        hidden_size,
+        num_layers=1,
+        seq_model="rnn",
+        seq_len=40,
+        device=None,
+        dtype="float32",
+    ):
         """
         Consists of an embedding layer, a sequence model (either RNN or LSTM), and a
         linear layer.
@@ -74,9 +102,13 @@ class LanguageModel(nn.Module):
         """
         super(LanguageModel, self).__init__()
         ### BEGIN YOUR SOLUTION
-        self.embedding = nn.Embedding(output_size, embedding_size, device=device, dtype=dtype)
-        seq_cls = nn.RNN if seq_model == 'rnn' else nn.LSTM
-        self.seq_model = seq_cls(embedding_size, hidden_size, num_layers, device=device, dtype=dtype)
+        self.embedding = nn.Embedding(
+            output_size, embedding_size, device=device, dtype=dtype
+        )
+        seq_cls = nn.RNN if seq_model == "rnn" else nn.LSTM
+        self.seq_model = seq_cls(
+            embedding_size, hidden_size, num_layers, device=device, dtype=dtype
+        )
         self.out_proj = nn.Linear(hidden_size, output_size, device=device, dtype=dtype)
         ### END YOUR SOLUTION
 
@@ -108,6 +140,10 @@ if __name__ == "__main__":
     model = ResNet9()
     x = ndl.ops.randu((1, 32, 32, 3), requires_grad=True)
     model(x)
-    cifar10_train_dataset = ndl.data.CIFAR10Dataset("data/cifar-10-batches-py", train=True)
-    train_loader = ndl.data.DataLoader(cifar10_train_dataset, 128, ndl.cpu(), dtype="float32")
+    cifar10_train_dataset = ndl.data.CIFAR10Dataset(
+        "data/cifar-10-batches-py", train=True
+    )
+    train_loader = ndl.data.DataLoader(
+        cifar10_train_dataset, 128, ndl.cpu(), dtype="float32"
+    )
     print(cifar10_train_dataset[1][0].shape)
