@@ -445,9 +445,11 @@ class LAMB(Optimizer):
             update_norm = ndl.ops.power_scalar(ndl.ops.summation(update * update), 0.5)
             # Trust ratio with clipping to avoid division by zero
             trust_ratio = ndl.ops.divide(param_norm, update_norm + self.eps)
+            # Extract scalar value from trust_ratio tensor to avoid shape mismatch
+            trust_ratio_scalar = float(trust_ratio.numpy().item())
 
             # Apply layer-wise adaptive update
-            new_data = param.data - self.lr * trust_ratio * update
+            new_data = param.data - self.lr * trust_ratio_scalar * update
             param.data = ndl.Tensor(
                 new_data.numpy().astype(param.dtype), dtype=param.dtype
             )
