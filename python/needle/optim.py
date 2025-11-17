@@ -1,4 +1,5 @@
 """Optimization module with registry utilities for config-driven instantiation."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -77,7 +78,9 @@ def optimizer_spec(name: str) -> _OptimizerSpec:
     try:
         return _OPTIMIZER_REGISTRY[name.lower()]
     except KeyError as exc:
-        registered = ", ".join(sorted(set(spec.name for spec in _OPTIMIZER_REGISTRY.values())))
+        registered = ", ".join(
+            sorted(set(spec.name for spec in _OPTIMIZER_REGISTRY.values()))
+        )
         raise KeyError(f"Unknown optimizer '{name}'. Available: {registered}") from exc
 
 
@@ -141,18 +144,20 @@ class SGD(Optimizer):
         self.weight_decay = weight_decay
         self.params = params
         for param in params:
-          self.u[hash(param)] = 0.0
+            self.u[hash(param)] = 0.0
 
     def step(self):
         ### BEGIN YOUR SOLUTION
         for param in self.params:
-          if not param.grad:
-            continue
-          g = param.grad.data + self.weight_decay * param.data
-          u = self.momentum * self.u[hash(param)] + (1 - self.momentum)*g
-          self.u[hash(param)] = u
-          new_data = param.data - self.lr * u
-          param.data = ndl.Tensor(new_data.numpy().astype(param.dtype), dtype=param.dtype)
+            if not param.grad:
+                continue
+            g = param.grad.data + self.weight_decay * param.data
+            u = self.momentum * self.u[hash(param)] + (1 - self.momentum) * g
+            self.u[hash(param)] = u
+            new_data = param.data - self.lr * u
+            param.data = ndl.Tensor(
+                new_data.numpy().astype(param.dtype), dtype=param.dtype
+            )
         ### END YOUR SOLUTION
 
     def clip_grad_norm(self, max_norm=0.25):
@@ -183,22 +188,26 @@ class RMSProp(Optimizer):
         self.v = {}
         # initialization
         for param in self.params:
-          self.v[hash(param)] = 0
+            self.v[hash(param)] = 0
 
     def step(self):
         ### BEGIN YOUR SOLUTION
         for param in self.params:
-          if not param.grad:
-            continue
-          param_key = hash(param)
-          # Apply weight decay to gradient
-          gradient = param.grad.data + self.weight_decay * param.data
-          # Update running average of squared gradients
-          v = self.alpha * self.v[param_key] + (1 - self.alpha) * gradient * gradient
-          self.v[param_key] = v
-          # Update parameters: param = param - lr * g / (sqrt(v) + eps)
-          new_data = param.data - self.lr * ndl.ops.divide(gradient, ndl.ops.power_scalar(v, 0.5) + self.eps)
-          param.data = ndl.Tensor(new_data.numpy().astype(param.dtype), dtype=param.dtype)
+            if not param.grad:
+                continue
+            param_key = hash(param)
+            # Apply weight decay to gradient
+            gradient = param.grad.data + self.weight_decay * param.data
+            # Update running average of squared gradients
+            v = self.alpha * self.v[param_key] + (1 - self.alpha) * gradient * gradient
+            self.v[param_key] = v
+            # Update parameters: param = param - lr * g / (sqrt(v) + eps)
+            new_data = param.data - self.lr * ndl.ops.divide(
+                gradient, ndl.ops.power_scalar(v, 0.5) + self.eps
+            )
+            param.data = ndl.Tensor(
+                new_data.numpy().astype(param.dtype), dtype=param.dtype
+            )
         ### END YOUR SOLUTION
 
 
@@ -224,30 +233,34 @@ class Adam(Optimizer):
         self.v = {}
         # initialization
         for param in self.params:
-          self.m[hash(param)] = 0
-          self.v[hash(param)] = 0
+            self.m[hash(param)] = 0
+            self.v[hash(param)] = 0
 
     def step(self):
         ### BEGIN YOUR SOLUTION
         self.t = self.t + 1
         for param in self.params:
-          if not param.grad:
-            continue
-          param_key = hash(param)
-          # FIX: Correct weight decay formula
-          gradient = param.grad.data + self.weight_decay * param.data
-          # FIX: Correct variable assignments
-          m = self.beta1 * self.m[param_key] + (1 - self.beta1) * gradient
-          self.m[param_key] = m
-          v = self.beta2 * self.v[param_key] + (1 - self.beta2) * gradient * gradient
-          self.v[param_key] = v
+            if not param.grad:
+                continue
+            param_key = hash(param)
+            # FIX: Correct weight decay formula
+            gradient = param.grad.data + self.weight_decay * param.data
+            # FIX: Correct variable assignments
+            m = self.beta1 * self.m[param_key] + (1 - self.beta1) * gradient
+            self.m[param_key] = m
+            v = self.beta2 * self.v[param_key] + (1 - self.beta2) * gradient * gradient
+            self.v[param_key] = v
 
-          # bias correction
-          m_hat = m / (1 - self.beta1**self.t)
-          v_hat = v / (1 - self.beta2**self.t)
+            # bias correction
+            m_hat = m / (1 - self.beta1**self.t)
+            v_hat = v / (1 - self.beta2**self.t)
 
-          new_data = param.data - self.lr * ndl.ops.divide(m_hat, ndl.ops.power_scalar(v_hat, 0.5) + self.eps)
-          param.data = ndl.Tensor(new_data.numpy().astype(param.dtype), dtype=param.dtype)
+            new_data = param.data - self.lr * ndl.ops.divide(
+                m_hat, ndl.ops.power_scalar(v_hat, 0.5) + self.eps
+            )
+            param.data = ndl.Tensor(
+                new_data.numpy().astype(param.dtype), dtype=param.dtype
+            )
         ### END YOUR SOLUTION
 
 
@@ -289,7 +302,9 @@ class Adagrad(Optimizer):
             # Update parameters: param = param - lr * g / (sqrt(G) + eps)
             denom = ndl.ops.power_scalar(self.G[param_key], 0.5) + self.eps
             new_data = param.data - self.lr * ndl.ops.divide(gradient, denom)
-            param.data = ndl.Tensor(new_data.numpy().astype(param.dtype), dtype=param.dtype)
+            param.data = ndl.Tensor(
+                new_data.numpy().astype(param.dtype), dtype=param.dtype
+            )
         ### END YOUR SOLUTION
 
 
@@ -331,7 +346,9 @@ class Adagrad(Optimizer):
             # Update parameters: param = param - lr * g / (sqrt(G) + eps)
             denom = ndl.ops.power_scalar(self.G[param_key], 0.5) + self.eps
             new_data = param.data - self.lr * ndl.ops.divide(gradient, denom)
-            param.data = ndl.Tensor(new_data.numpy().astype(param.dtype), dtype=param.dtype)
+            param.data = ndl.Tensor(
+                new_data.numpy().astype(param.dtype), dtype=param.dtype
+            )
         ### END YOUR SOLUTION
 
 
@@ -363,8 +380,8 @@ class AdamW(Optimizer):
     def step(self):
         ### BEGIN YOUR SOLUTION
         self.t += 1
-        bias_correction1 = 1 - self.beta1 ** self.t
-        bias_correction2 = 1 - self.beta2 ** self.t
+        bias_correction1 = 1 - self.beta1**self.t
+        bias_correction2 = 1 - self.beta2**self.t
 
         for param in self.params:
             if param.grad is None:
@@ -394,7 +411,91 @@ class AdamW(Optimizer):
                 adam_step = adam_step + self.weight_decay * param.data
 
             new_data = param.data - self.lr * adam_step
-            param.data = ndl.Tensor(new_data.numpy().astype(param.dtype), dtype=param.dtype)
+            param.data = ndl.Tensor(
+                new_data.numpy().astype(param.dtype), dtype=param.dtype
+            )
+        ### END YOUR SOLUTION
+
+
+class LAMB(Optimizer):
+    def __init__(
+        self,
+        params,
+        lr=0.01,
+        beta1=0.9,
+        beta2=0.999,
+        eps=1e-8,
+        weight_decay=0.0,
+    ):
+        super().__init__(params)
+        self.lr = lr
+        self.beta1 = beta1
+        self.beta2 = beta2
+        self.eps = eps
+        self.weight_decay = weight_decay
+        self.t = 0
+
+        self.m = {}
+        self.v = {}
+        for param in self.params:
+            param_key = hash(param)
+            self.m[param_key] = ndl.zeros_like(param.data)
+            self.v[param_key] = ndl.zeros_like(param.data)
+
+    def step(self):
+        ### BEGIN YOUR SOLUTION
+        self.t += 1
+        bias_correction1 = 1 - self.beta1**self.t
+        bias_correction2 = 1 - self.beta2**self.t
+
+        for param in self.params:
+            if param.grad is None:
+                continue
+
+            param_key = hash(param)
+            if param_key not in self.m:
+                self.m[param_key] = ndl.zeros_like(param.data)
+                self.v[param_key] = ndl.zeros_like(param.data)
+
+            # Get gradient (without weight decay applied yet)
+            gradient = param.grad.data
+
+            # Update first and second moment estimates (like Adam)
+            m_prev = self.m[param_key]
+            v_prev = self.v[param_key]
+
+            m = self.beta1 * m_prev + (1 - self.beta1) * gradient
+            v = self.beta2 * v_prev + (1 - self.beta2) * (gradient * gradient)
+            self.m[param_key] = m
+            self.v[param_key] = v
+
+            # Bias correction
+            m_hat = m / bias_correction1
+            v_hat = v / bias_correction2
+
+            # Compute update direction (Adam-style)
+            denom = ndl.ops.power_scalar(v_hat, 0.5) + self.eps
+            update = ndl.ops.divide(m_hat, denom)
+
+            # Add weight decay to update (LAMB applies weight decay to update, not gradient)
+            if self.weight_decay != 0.0:
+                update = update + self.weight_decay * param.data
+
+            # Compute trust ratio: ||param|| / ||update||
+            # L2 norm of parameters
+            param_norm = ndl.ops.power_scalar(
+                ndl.ops.summation(param.data * param.data), 0.5
+            )
+            # L2 norm of update
+            update_norm = ndl.ops.power_scalar(ndl.ops.summation(update * update), 0.5)
+            # Trust ratio with clipping to avoid division by zero
+            trust_ratio = ndl.ops.divide(param_norm, update_norm + self.eps)
+
+            # Apply layer-wise adaptive update
+            new_data = param.data - self.lr * trust_ratio * update
+            param.data = ndl.Tensor(
+                new_data.numpy().astype(param.dtype), dtype=param.dtype
+            )
         ### END YOUR SOLUTION
 
 
@@ -421,11 +522,35 @@ register_optimizer(
 register_optimizer(
     "adam",
     Adam,
-    defaults={"lr": 0.01, "beta1": 0.9, "beta2": 0.999, "eps": 1e-8, "weight_decay": 0.0},
+    defaults={
+        "lr": 0.01,
+        "beta1": 0.9,
+        "beta2": 0.999,
+        "eps": 1e-8,
+        "weight_decay": 0.0,
+    },
 )
 
 register_optimizer(
     "adamw",
     AdamW,
-    defaults={"lr": 0.01, "beta1": 0.9, "beta2": 0.999, "eps": 1e-8, "weight_decay": 0.0},
+    defaults={
+        "lr": 0.01,
+        "beta1": 0.9,
+        "beta2": 0.999,
+        "eps": 1e-8,
+        "weight_decay": 0.0,
+    },
+)
+
+register_optimizer(
+    "lamb",
+    LAMB,
+    defaults={
+        "lr": 0.01,
+        "beta1": 0.9,
+        "beta2": 0.999,
+        "eps": 1e-8,
+        "weight_decay": 0.0,
+    },
 )
