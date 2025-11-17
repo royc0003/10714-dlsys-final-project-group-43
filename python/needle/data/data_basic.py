@@ -30,6 +30,31 @@ class Dataset:
         return x
 
 
+class DatasetSubset(Dataset):
+    r"""Subset of a dataset at specified indices.
+    
+    Args:
+        dataset (Dataset): The whole Dataset
+        indices (sequence): Indices in the whole dataset selected for subset
+    """
+    
+    def __init__(self, dataset: Dataset, indices: np.ndarray):
+        super().__init__(transforms=dataset.transforms)
+        self.dataset = dataset
+        self.indices = indices
+    
+    def __getitem__(self, idx):
+        if isinstance(idx, (list, np.ndarray)):
+            # Handle batch indexing
+            return self.dataset[[self.indices[i] for i in idx]]
+        else:
+            # Handle single index
+            return self.dataset[self.indices[idx]]
+    
+    def __len__(self):
+        return len(self.indices)
+
+
 class DataLoader:
     r"""
     Data loader. Combines a dataset and a sampler, and provides an iterable over
