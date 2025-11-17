@@ -165,6 +165,43 @@ class SGD(Optimizer):
         ### END YOUR SOLUTION
 
 
+class RMSProp(Optimizer):
+    def __init__(
+        self,
+        params,
+        lr=0.01,
+        alpha=0.99,
+        eps=1e-8,
+        weight_decay=0.0,
+    ):
+        super().__init__(params)
+        self.lr = lr
+        self.alpha = alpha
+        self.eps = eps
+        self.weight_decay = weight_decay
+
+        self.v = {}
+        # initialization
+        for param in self.params:
+          self.v[hash(param)] = 0
+
+    def step(self):
+        ### BEGIN YOUR SOLUTION
+        for param in self.params:
+          if not param.grad:
+            continue
+          param_key = hash(param)
+          # Apply weight decay to gradient
+          gradient = param.grad.data + self.weight_decay * param.data
+          # Update running average of squared gradients
+          v = self.alpha * self.v[param_key] + (1 - self.alpha) * gradient * gradient
+          self.v[param_key] = v
+          # Update parameters: param = param - lr * g / (sqrt(v) + eps)
+          new_data = param.data - self.lr * ndl.ops.divide(gradient, ndl.ops.power_scalar(v, 0.5) + self.eps)
+          param.data = ndl.Tensor(new_data.numpy().astype(param.dtype), dtype=param.dtype)
+        ### END YOUR SOLUTION
+
+
 class Adam(Optimizer):
     def __init__(
         self,
@@ -211,6 +248,48 @@ class Adam(Optimizer):
 
           new_data = param.data - self.lr * ndl.ops.divide(m_hat, ndl.ops.power_scalar(v_hat, 0.5) + self.eps)
           param.data = ndl.Tensor(new_data.numpy().astype(param.dtype), dtype=param.dtype)
+        ### END YOUR SOLUTION
+
+
+class Adagrad(Optimizer):
+    def __init__(
+        self,
+        params,
+        lr=0.01,
+        eps=1e-8,
+        weight_decay=0.0,
+    ):
+        super().__init__(params)
+        self.lr = lr
+        self.eps = eps
+        self.weight_decay = weight_decay
+
+        self.G = {}
+        # Initialize accumulator for squared gradients
+        for param in self.params:
+            param_key = hash(param)
+            self.G[param_key] = ndl.zeros_like(param.data)
+
+    def step(self):
+        ### BEGIN YOUR SOLUTION
+        for param in self.params:
+            if param.grad is None:
+                continue
+
+            param_key = hash(param)
+            if param_key not in self.G:
+                self.G[param_key] = ndl.zeros_like(param.data)
+
+            # Apply weight decay to gradient
+            gradient = param.grad.data + self.weight_decay * param.data
+
+            # Accumulate squared gradients: G = G + g²
+            self.G[param_key] = self.G[param_key] + gradient * gradient
+
+            # Update parameters: param = param - lr * g / (sqrt(G) + eps)
+            denom = ndl.ops.power_scalar(self.G[param_key], 0.5) + self.eps
+            new_data = param.data - self.lr * ndl.ops.divide(gradient, denom)
+            param.data = ndl.Tensor(new_data.numpy().astype(param.dtype), dtype=param.dtype)
         ### END YOUR SOLUTION
 
 
@@ -325,6 +404,12 @@ register_optimizer(
     SGD,
     defaults={"lr": 0.01, "momentum": 0.0, "weight_decay": 0.0},
     aliases=("stochastic_gradient_descent",),
+)
+
+register_optimizer(
+    "rmsprop",
+    RMSProp,
+    defaults={"lr": 0.01, "alpha": 0.99, "eps": 1e-8, "weight_decay": 0.0},
 )
 
 register_optimizer(
