@@ -7,7 +7,6 @@ from typing import Any, Dict, Iterable, Sequence, Type
 import copy
 
 import needle as ndl
-import numpy as np
 
 
 @dataclass(frozen=True, slots=True)
@@ -258,50 +257,6 @@ class Adam(Optimizer):
             new_data = param.data - self.lr * ndl.ops.divide(
                 m_hat, ndl.ops.power_scalar(v_hat, 0.5) + self.eps
             )
-            param.data = ndl.Tensor(
-                new_data.numpy().astype(param.dtype), dtype=param.dtype
-            )
-        ### END YOUR SOLUTION
-
-
-class Adagrad(Optimizer):
-    def __init__(
-        self,
-        params,
-        lr=0.01,
-        eps=1e-8,
-        weight_decay=0.0,
-    ):
-        super().__init__(params)
-        self.lr = lr
-        self.eps = eps
-        self.weight_decay = weight_decay
-
-        self.G = {}
-        # Initialize accumulator for squared gradients
-        for param in self.params:
-            param_key = hash(param)
-            self.G[param_key] = ndl.zeros_like(param.data)
-
-    def step(self):
-        ### BEGIN YOUR SOLUTION
-        for param in self.params:
-            if param.grad is None:
-                continue
-
-            param_key = hash(param)
-            if param_key not in self.G:
-                self.G[param_key] = ndl.zeros_like(param.data)
-
-            # Apply weight decay to gradient
-            gradient = param.grad.data + self.weight_decay * param.data
-
-            # Accumulate squared gradients: G = G + g²
-            self.G[param_key] = self.G[param_key] + gradient * gradient
-
-            # Update parameters: param = param - lr * g / (sqrt(G) + eps)
-            denom = ndl.ops.power_scalar(self.G[param_key], 0.5) + self.eps
-            new_data = param.data - self.lr * ndl.ops.divide(gradient, denom)
             param.data = ndl.Tensor(
                 new_data.numpy().astype(param.dtype), dtype=param.dtype
             )
