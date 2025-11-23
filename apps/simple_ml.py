@@ -150,7 +150,6 @@ def epoch_general_cifar10(
         avg_acc: average accuracy over dataset
         avg_loss: average loss over dataset
     """
-    np.random.seed(4)
     ### BEGIN YOUR SOLUTION
     if dataloader is None:
         raise ValueError("dataloader cannot be None")
